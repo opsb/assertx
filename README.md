@@ -62,6 +62,17 @@ right: %{user: %{age: #Failed<adult: 17>,
 
 ExUnit highlights only the leaves that differ.
 
+A dozen worked failure examples — partial maps, predicates, nested
+mismatches, `M.all` over a list of maps, and so on — live in
+[`test/examples_test.exs`](test/examples_test.exs) and can be run with:
+
+```
+mix examples
+```
+
+They are tagged `:examples`, excluded from a normal `mix test` run, and
+fail by design so you can see the actual diff output side by side.
+
 ## Matcher reference
 
 ```elixir
