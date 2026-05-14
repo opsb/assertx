@@ -15,12 +15,23 @@ defmodule Assertx do
 
   alias Assertx.Matchers
 
+  @typedoc "The pair returned by every matcher — two values that diff equal iff the match succeeded."
+  @type matcher_result :: {term(), term()}
+
+  @typedoc "A function returned by every combinator in `Assertx.Matchers` — call it with an `actual` value to get a `t:matcher_result/0`."
+  @type matcher_fun :: (term() -> matcher_result())
+
+  @typedoc "A user predicate. Truthy values are treated as a match, `false`/`nil` as a mismatch."
+  @type predicate_fun :: (term() -> as_boolean(term()))
+
   defmodule Failed do
     @moduledoc """
     Sentinel placed on the `expected` side of a pinned pair whenever a predicate
     fails. Its custom `Inspect` impl makes failures render as
     `#Failed<label: actual>` inside ExUnit's diff output.
     """
+
+    @type t :: %__MODULE__{label: String.t() | atom(), actual: term()}
 
     @enforce_keys [:label, :actual]
     defstruct [:label, :actual]
@@ -48,6 +59,7 @@ defmodule Assertx do
     * a 1-arity function — treated as a predicate
     * a matcher built with `Assertx.Matchers.*` — invoked directly
   """
+  @spec match(term(), term()) :: matcher_result()
   def match(actual, expected) when is_function(expected, 1) do
     case expected.(actual) do
       {_, _} = pair -> pair

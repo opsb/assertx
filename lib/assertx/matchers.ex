@@ -14,6 +14,7 @@ defmodule Assertx.Matchers do
   Equality matcher. Pinned pair is always `{actual, expected}` — equal iff the
   values are equal.
   """
+  @spec eq(term()) :: Assertx.matcher_fun()
   def eq(expected) do
     fn actual -> {actual, expected} end
   end
@@ -22,6 +23,7 @@ defmodule Assertx.Matchers do
   Predicate matcher. If `fun.(actual)` is truthy the pair pins equal; otherwise
   the expected side becomes a `%Failed{}` carrying the optional `label`.
   """
+  @spec predicate(Assertx.predicate_fun(), String.t() | atom()) :: Assertx.matcher_fun()
   def predicate(fun, label \\ "predicate") when is_function(fun, 1) do
     fn actual ->
       if fun.(actual),
@@ -35,6 +37,7 @@ defmodule Assertx.Matchers do
   in `actual` that aren't named in `spec`. Missing keys surface as `nil` on the
   actual side.
   """
+  @spec map(map()) :: Assertx.matcher_fun()
   def map(spec) when is_map(spec) and not is_struct(spec) do
     fn
       actual when is_map(actual) ->
@@ -60,6 +63,7 @@ defmodule Assertx.Matchers do
     * `all(matchers_list)` — element-wise match; sizes must agree, otherwise
       both raw lists are surfaced for ExUnit to diff.
   """
+  @spec all(term() | [term()]) :: Assertx.matcher_fun()
   def all(matchers) when is_list(matchers) do
     fn
       actual when is_list(actual) and length(actual) == length(matchers) ->

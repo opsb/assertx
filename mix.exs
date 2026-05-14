@@ -8,7 +8,7 @@ defmodule Assertx.MixProject do
     [
       app: :assertx,
       version: @version,
-      elixir: "~> 1.16",
+      elixir: "~> 1.18",
       description: description(),
       package: package(),
       source_url: @source_url,
