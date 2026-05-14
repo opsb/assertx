@@ -1,39 +1,104 @@
 # Assertx
 
-Composable matchers for ExUnit assertions, inspired by [Hamcrest](https://hamcrest.org/) matchers
-from the JVM/Ruby world.
+Composable matchers for ExUnit assertions, inspired by [Hamcrest](https://hamcrest.org/).
 
-Rather than writing a separate `assert` for every field of a value, you describe the *shape* you
-expect with a tree of matchers and get back a structured result that records which parts matched
-and which did not. Matchers nest naturally — `map/1` composes with `eq/1`, `all/1` composes with
-`map/1`, and any plain value or predicate function can stand in as a matcher via convenient
-shortcuts.
+Rather than writing a separate `assert` for every field of a value, you describe
+the *shape* you expect with a tree of matchers and let ExUnit's diff engine
+render the failure. The expected shape is plain data — literals, predicates, and
+nested matchers — so it can be built programmatically, reused across tests, and
+composed.
 
 ```elixir
-import Assertx
-alias Assertx.Matchers, as: M
+defmodule MyAppTest do
+  use ExUnit.Case
+  import Assertx.ExUnit
+  alias Assertx.Matchers, as: M
 
-# Equality
-match(1, M.eq(1))
-match(1, 1)                              # shortcut for M.eq/1
+  test "registered user has the right shape" do
+    {:ok, user} = MyApp.register("a@b.c")
 
-# Predicates
-match(5, &(&1 > 3))
-
-# Maps (only the keys you specify are checked)
-match(%{a: 1, b: 2}, %{a: M.eq(1)})
-match(%{a: 1, b: 2}, %{a: 1})            # shortcut: values become M.eq/1
-
-# Lists — every element against the same matcher…
-match([1, 2, 3], M.all(&(&1 > 0)))
-
-# …or element-wise
-match([%{a: 1}, %{a: 2}], M.all([%{a: 1}, %{a: 2}]))
+    assertx user, %{
+      email: "a@b.c",
+      age:   M.predicate(&(&1 >= 18), "adult"),
+      roles: M.all(&is_atom/1),
+      profile: %{
+        created_at: M.predicate(&match?(%DateTime{}, &1), "DateTime")
+      }
+    }
+  end
+end
 ```
 
-Each call returns either an `%Assertx.Match{}` or `%Assertx.Mismatch{}` whose `:value` records
-the matched/mismatched sub-results, so failures point at the exact leaf that didn't match instead
-of dumping two whole structs side-by-side.
+Three things to notice:
+
+1. The expected shape is **plain data**. Build it programmatically, pass it
+   around, store it in a fixture module.
+2. Keys you don't list (`id`, `inserted_at`, anything else on `user`) are
+   ignored — partial-match semantics.
+3. Predicates carry an optional label that surfaces in failure output.
+
+## How failures look
+
+`assertx` raises `ExUnit.AssertionError` with `:left` and `:right`
+populated, so failures render through ExUnit's native diff engine — same
+colourisation and structural diffing you get from any `assert ==`. Only the
+mismatching leaves and the keys you actually asserted on appear in the diff;
+the rest of the original value stays out of your way.
+
+For a `user` that's 17 with a string in its `roles`, the failure for the
+example above looks roughly like:
+
+```
+assertx failed
+left:  %{user: %{age: 17,
+                 email: "a@b.c",
+                 profile: %{...},
+                 roles: [:admin, "writer"]}}
+right: %{user: %{age: #Failed<adult: 17>,
+                 email: "a@b.c",
+                 profile: %{...},
+                 roles: [:admin, #Failed<predicate: "writer">]}}
+```
+
+ExUnit highlights only the leaves that differ.
+
+A dozen worked failure examples — partial maps, predicates, nested
+mismatches, `M.all` over a list of maps, and so on — live in
+[`test/examples_test.exs`](test/examples_test.exs) and can be run with:
+
+```
+mix examples
+```
+
+They are tagged `:examples`, excluded from a normal `mix test` run, and
+fail by design so you can see the actual diff output side by side.
+
+## Matcher reference
+
+```elixir
+alias Assertx.Matchers, as: M
+
+# Equality (the default for literals)
+assertx 1, 1
+assertx 1, M.eq(1)
+
+# Predicates
+assertx 5, &(&1 > 0)                          # bare function
+assertx 5, M.predicate(&(&1 > 0), "positive") # with label
+
+# Maps — partial match, extra keys ignored
+assertx %{a: 1, b: 2, extra: :ok}, %{a: 1, b: 2}
+
+# Lists — element-wise (sizes must agree)
+assertx [1, 2], [1, 2]
+assertx [1, 2], M.all([1, 2])
+
+# Lists — every element against the same matcher
+assertx [1, 2, 3], M.all(&(&1 > 0))
+
+# Compose freely
+assertx users, M.all(%{id: &is_binary/1, age: M.predicate(&(&1 >= 18), "adult")})
+```
 
 ## Installation
 
@@ -42,7 +107,7 @@ Add `assertx` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:assertx, "~> 0.1.0"}
+    {:assertx, "~> 0.1.0", only: :test}
   ]
 end
 ```

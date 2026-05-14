@@ -1,1 +1,1 @@
-ExUnit.start(exclude: [:broken])
+ExUnit.start(exclude: [:broken, :examples])
