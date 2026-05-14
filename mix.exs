@@ -14,6 +14,7 @@ defmodule Assertx.MixProject do
       source_url: @source_url,
       docs: docs(),
       start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
       deps: deps()
     ]
   end
@@ -21,6 +22,12 @@ defmodule Assertx.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [examples: :test]
     ]
   end
 
@@ -47,6 +54,12 @@ defmodule Assertx.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+    ]
+  end
+
+  defp aliases do
+    [
+      examples: ["test --only examples --seed 0"]
     ]
   end
 end
