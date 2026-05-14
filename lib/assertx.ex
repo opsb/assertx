@@ -61,59 +61,63 @@ defmodule Assertx do
     |> IO.iodata_to_binary()
   end
 
-  defp do_render(%Match{value: {:eq, left, right}}, _ctx) do
-    [IO.ANSI.green(), "#{left} == #{right}", IO.ANSI.reset()]
+  defp do_render(%Match{value: value}, ctx), do: do_render_value(value, ctx, :match)
+  defp do_render(%Mismatch{value: value}, ctx), do: do_render_value(value, ctx, :mismatch)
+
+  defp do_render_value({:eq, left, right}, _ctx, :match) do
+    leaf(:match, "#{inspect(left)} == #{inspect(right)}")
   end
 
-  defp do_render(%Mismatch{value: {:neq, left, right}}, _ctx) do
-    [IO.ANSI.red(), "#{left} != #{right}", IO.ANSI.reset()]
+  defp do_render_value({:neq, left, right}, _ctx, :mismatch) do
+    leaf(:mismatch, "#{inspect(left)} != #{inspect(right)}")
   end
 
-  defp do_render(%Match{value: {left, right}}, _ctx) when is_function(right) do
-    [IO.ANSI.green(), "#{inspect(left)} matches #{inspect(right)}", IO.ANSI.reset()]
+  defp do_render_value({left, right}, _ctx, :match) when is_function(right) do
+    leaf(:match, "#{inspect(left)} matches predicate")
   end
 
-  defp do_render(%Mismatch{value: {left, right}}, _ctx) when is_function(right) do
-    [IO.ANSI.red(), "#{inspect(left)} does not match #{inspect(right)}", IO.ANSI.reset()]
+  defp do_render_value({left, right}, _ctx, :mismatch) when is_function(right) do
+    leaf(:mismatch, "#{inspect(left)} does not match predicate")
   end
 
-  defp do_render(%Match{value: map}, ctx) when is_map(map) and not is_struct(map) do
-    render_map(map, ctx, IO.ANSI.green())
+  defp do_render_value(map, ctx, _kind) when is_map(map) and not is_struct(map) do
+    render_map(map, ctx)
   end
 
-  defp do_render(%Mismatch{value: map}, ctx) when is_map(map) and not is_struct(map) do
-    render_map(map, ctx, IO.ANSI.red())
+  defp do_render_value(list, ctx, _kind) when is_list(list) do
+    render_list(list, ctx)
   end
 
-  defp do_render(%Match{value: list}, ctx) when is_list(list) do
-    render_list(list, ctx, IO.ANSI.green())
-  end
+  defp leaf(:match, body), do: [IO.ANSI.green(), body, IO.ANSI.reset()]
+  defp leaf(:mismatch, body), do: [IO.ANSI.red(), body, IO.ANSI.reset()]
 
-  defp do_render(%Mismatch{value: list}, ctx) when is_list(list) do
-    render_list(list, ctx, IO.ANSI.red())
-  end
-
-  defp render_map(map, ctx, color) do
+  defp render_map(map, ctx) do
     inner_ctx = RenderContext.indent(ctx)
 
     entries =
-      Enum.map(map, fn {key, result} ->
-        [render_indent(inner_ctx), color, "#{key}: ", do_render(result, inner_ctx), "\n"]
+      map
+      |> Enum.sort_by(fn {key, _} -> key end)
+      |> Enum.map(fn {key, result} ->
+        [render_indent(inner_ctx), render_key(key), do_render(result, inner_ctx)]
       end)
+      |> Enum.intersperse(",\n")
 
-    [color, "%{\n", entries, render_indent(ctx), color, "}", IO.ANSI.reset()]
+    ["%{\n", entries, "\n", render_indent(ctx), "}"]
   end
 
-  defp render_list(list, ctx, color) do
+  defp render_list(list, ctx) do
     inner_ctx = RenderContext.indent(ctx)
 
     entries =
-      Enum.map(list, fn result ->
-        [render_indent(inner_ctx), do_render(result, inner_ctx), "\n"]
-      end)
+      list
+      |> Enum.map(fn result -> [render_indent(inner_ctx), do_render(result, inner_ctx)] end)
+      |> Enum.intersperse(",\n")
 
-    [color, "[\n", entries, render_indent(ctx), color, "]", IO.ANSI.reset()]
+    ["[\n", entries, "\n", render_indent(ctx), "]"]
   end
+
+  defp render_key(key) when is_atom(key), do: "#{key}: "
+  defp render_key(key), do: "#{inspect(key)} => "
 
   defp render_indent(%{indent_level: 0}), do: ""
 

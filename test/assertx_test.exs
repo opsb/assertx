@@ -77,28 +77,34 @@ defmodule AssertxTest do
   end
 
   describe "render" do
+    @green IO.ANSI.green()
+    @red IO.ANSI.red()
+    @reset IO.ANSI.reset()
+
     test "matching value" do
-      assert render(Match.new({:eq, 1, 1})) ==
-               "#{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}"
+      assert render(Match.new({:eq, 1, 1})) == "#{@green}1 == 1#{@reset}"
     end
 
     test "mismatching value" do
-      assert render(Mismatch.new({:neq, 1, 2})) ==
-               "#{IO.ANSI.red()}1 != 2#{IO.ANSI.reset()}"
+      assert render(Mismatch.new({:neq, 1, 2})) == "#{@red}1 != 2#{@reset}"
+    end
+
+    test "matching value with atom leaves" do
+      assert render(Match.new({:eq, :foo, :foo})) == "#{@green}:foo == :foo#{@reset}"
     end
 
     test "matching predicate" do
       predicate = fn x -> x > 0 end
 
       assert render(Match.new({5, predicate})) ==
-               "#{IO.ANSI.green()}5 matches #{inspect(predicate)}#{IO.ANSI.reset()}"
+               "#{@green}5 matches predicate#{@reset}"
     end
 
     test "mismatching predicate" do
       predicate = fn x -> x > 0 end
 
       assert render(Mismatch.new({-1, predicate})) ==
-               "#{IO.ANSI.red()}-1 does not match #{inspect(predicate)}#{IO.ANSI.reset()}"
+               "#{@red}-1 does not match predicate#{@reset}"
     end
 
     test "matching map" do
@@ -106,20 +112,20 @@ defmodule AssertxTest do
 
       assert render(result) ==
                """
-               #{IO.ANSI.green()}%{
-                 #{IO.ANSI.green()}a: #{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}
-               #{IO.ANSI.green()}}#{IO.ANSI.reset()}\
+               %{
+                 a: #{@green}1 == 1#{@reset}
+               }\
                """
     end
 
-    test "mismatching map entry colours the wrapper red" do
+    test "mismatching map entry" do
       result = match(%{a: 7}, %{a: M.eq(8)})
 
       assert render(result) ==
                """
-               #{IO.ANSI.red()}%{
-                 #{IO.ANSI.red()}a: #{IO.ANSI.red()}7 != 8#{IO.ANSI.reset()}
-               #{IO.ANSI.red()}}#{IO.ANSI.reset()}\
+               %{
+                 a: #{@red}7 != 8#{@reset}
+               }\
                """
     end
 
@@ -128,21 +134,44 @@ defmodule AssertxTest do
 
       assert render(result) ==
                """
-               #{IO.ANSI.green()}[
-                 #{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}
-                 #{IO.ANSI.green()}2 == 2#{IO.ANSI.reset()}
-               #{IO.ANSI.green()}]#{IO.ANSI.reset()}\
+               [
+                 #{@green}1 == 1#{@reset},
+                 #{@green}2 == 2#{@reset}
+               ]\
                """
     end
 
-    test "nested map renders with indentation" do
-      result = match(%{a: 3, b: %{c: 10}}, %{a: M.eq(3), b: %{c: M.eq(10)}})
+    test "nested map only colours the mismatched leaf" do
+      result = match(%{a: 3, b: %{c: 10, d: 20}}, %{a: M.eq(3), b: %{c: M.eq(10), d: M.eq(99)}})
 
+      assert render(result) ==
+               """
+               %{
+                 a: #{@green}3 == 3#{@reset},
+                 b: %{
+                   c: #{@green}10 == 10#{@reset},
+                   d: #{@red}20 != 99#{@reset}
+                 }
+               }\
+               """
+    end
+
+    test "map keys are sorted for stable output" do
+      result = match(%{b: 2, a: 1}, %{a: M.eq(1), b: M.eq(2)})
       rendered = render(result)
 
-      assert rendered =~ "a: #{IO.ANSI.green()}3 == 3"
-      assert rendered =~ "b: #{IO.ANSI.green()}%{"
-      assert rendered =~ "    #{IO.ANSI.green()}c: #{IO.ANSI.green()}10 == 10"
+      assert :binary.match(rendered, "a:") < :binary.match(rendered, "b:")
+    end
+
+    test "non-atom keys use the => arrow form" do
+      result = match(%{"k" => 1}, %{"k" => M.eq(1)})
+
+      assert render(result) ==
+               """
+               %{
+                 "k" => #{@green}1 == 1#{@reset}
+               }\
+               """
     end
   end
 end
