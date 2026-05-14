@@ -1,177 +1,347 @@
 defmodule AssertxTest do
   use ExUnit.Case
 
+  alias Assertx.Failed
   alias Assertx.Matchers, as: M
-  alias Assertx.Match
-  alias Assertx.Mismatch
-  import Assertx
+  import Assertx.ExUnit
 
-  describe "match" do
-    test "matching values" do
-      assert Match.new({:eq, 1, 1}) == match(1, M.eq(1))
+  describe "match/2 — literal equality" do
+    test "equal integers pin equal" do
+      assert {1, 1} == Assertx.match(1, 1)
     end
 
-    test "matching values - shortcut" do
-      assert Match.new({:eq, 1, 1}) == match(1, 1)
+    test "different integers pin different" do
+      assert {1, 2} == Assertx.match(1, 2)
     end
 
-    test "mismatching values" do
-      assert Mismatch.new({:neq, 1, 2}) == match(1, M.eq(2))
+    test "strings, atoms, tuples all pin via equality" do
+      assert {"a", "a"} == Assertx.match("a", "a")
+      assert {:ok, :ok} == Assertx.match(:ok, :ok)
+      assert {{1, 2}, {1, 2}} == Assertx.match({1, 2}, {1, 2})
     end
 
-    test "matching predicate" do
-      predicate = M.predicate(&(&1 > 3))
-      assert Match.new({5, predicate}) == match(5, predicate)
-    end
-
-    test "matching predicate - shortcut" do
-      predicate = &(&1 > 3)
-      assert Match.new({5, predicate}) == match(5, predicate)
-    end
-
-    test "matching map" do
-      assert Match.new(%{a: Match.new({:eq, 1, 1})}) == match(%{a: 1}, M.map(%{a: M.eq(1)}))
-    end
-
-    test "matching map - shortcut" do
-      assert Match.new(%{a: Match.new({:eq, 1, 1})}) == match(%{a: 1}, %{a: M.eq(1)})
-    end
-
-    test "all matching function" do
-      predicate = M.predicate(&(&1 > 0))
-
-      assert Match.new([
-               Match.new({1, predicate}),
-               Match.new({2, predicate}),
-               Match.new({3, predicate})
-             ]) ==
-               match([1, 2, 3], M.all(predicate))
-    end
-
-    test "matching all maps" do
-      match([%{a: 1}, %{a: 2}], M.all([M.map(%{a: M.eq(1)}), M.map(%{a: M.eq(2)})]))
-    end
-
-    test "all values matching" do
-      match([1, 2], M.all([1, 2]))
-    end
-
-    test "all maps matching - shortcut" do
-      match([%{a: 1}, %{a: 2}], M.all([%{a: 1}, %{a: 2}]))
-    end
-
-    test "matching map entries" do
-      assert Match.new(%{a: Match.new({:eq, 2, 2}), b: Match.new({:eq, 3, 3})}) ==
-               match(%{a: 2, b: 3}, M.map(%{a: M.eq(2), b: M.eq(3)}))
-    end
-
-    test "mismatching map entries" do
-      assert Mismatch.new(%{a: Mismatch.new({:neq, 7, 8}), b: Match.new({:eq, 3, 3})}) ==
-               match(%{a: 7, b: 3}, M.map(%{a: M.eq(8), b: M.eq(3)}))
-    end
-
-    test "matching nested map" do
-      assert Match.new(%{a: Match.new({:eq, 3, 3}), b: Match.new(%{c: Match.new({:eq, 10, 10})})}) ==
-               match(%{a: 3, b: %{c: 10}}, M.map(%{a: M.eq(3), b: M.map(%{c: M.eq(10)})}))
+    test "nil is a normal equality value" do
+      assert {nil, nil} == Assertx.match(nil, nil)
+      assert {nil, :something} == Assertx.match(nil, :something)
     end
   end
 
-  describe "render" do
-    @green IO.ANSI.green()
-    @red IO.ANSI.red()
-    @reset IO.ANSI.reset()
-
-    test "matching value" do
-      assert render(Match.new({:eq, 1, 1})) == "#{@green}1 == 1#{@reset}"
+  describe "match/2 — predicates" do
+    test "bare function returning true pins equal" do
+      assert {5, 5} == Assertx.match(5, &(&1 > 0))
     end
 
-    test "mismatching value" do
-      assert render(Mismatch.new({:neq, 1, 2})) == "#{@red}1 != 2#{@reset}"
+    test "bare function returning false pins with default 'predicate' label" do
+      assert {-1, %Failed{label: "predicate", actual: -1}} ==
+               Assertx.match(-1, &(&1 > 0))
     end
 
-    test "matching value with atom leaves" do
-      assert render(Match.new({:eq, :foo, :foo})) == "#{@green}:foo == :foo#{@reset}"
+    test "M.predicate carries a custom label into Failed" do
+      assert {-1, %Failed{label: "positive", actual: -1}} ==
+               Assertx.match(-1, M.predicate(&(&1 > 0), "positive"))
     end
 
-    test "matching predicate" do
-      predicate = fn x -> x > 0 end
-
-      assert render(Match.new({5, predicate})) ==
-               "#{@green}5 matches predicate#{@reset}"
+    test "M.predicate without a label defaults to 'predicate'" do
+      {_, expected} = Assertx.match(-1, M.predicate(&(&1 > 0)))
+      assert %Failed{label: "predicate"} = expected
     end
 
-    test "mismatching predicate" do
-      predicate = fn x -> x > 0 end
+    test "predicate returning truthy-but-not-true counts as a match" do
+      assert {5, 5} == Assertx.match(5, fn x -> x end)
+    end
+  end
 
-      assert render(Mismatch.new({-1, predicate})) ==
-               "#{@red}-1 does not match predicate#{@reset}"
+  describe "match/2 — maps (partial match)" do
+    test "fully matching map pins equal" do
+      assert {%{a: 1}, %{a: 1}} == Assertx.match(%{a: 1}, %{a: 1})
     end
 
-    test "matching map" do
-      result = match(%{a: 1}, %{a: M.eq(1)})
-
-      assert render(result) ==
-               """
-               %{
-                 a: #{@green}1 == 1#{@reset}
-               }\
-               """
+    test "extra keys in actual are ignored" do
+      assert {%{a: 1}, %{a: 1}} ==
+               Assertx.match(%{a: 1, ignored: :keep}, %{a: 1})
     end
 
-    test "mismatching map entry" do
-      result = match(%{a: 7}, %{a: M.eq(8)})
-
-      assert render(result) ==
-               """
-               %{
-                 a: #{@red}7 != 8#{@reset}
-               }\
-               """
+    test "one mismatching value is isolated to that key" do
+      {actual, expected} = Assertx.match(%{a: 1, b: 2}, %{a: 1, b: 99})
+      assert actual == %{a: 1, b: 2}
+      assert expected == %{a: 1, b: 99}
     end
 
-    test "matching list" do
-      result = match([1, 2], M.all([1, 2]))
-
-      assert render(result) ==
-               """
-               [
-                 #{@green}1 == 1#{@reset},
-                 #{@green}2 == 2#{@reset}
-               ]\
-               """
+    test "missing key in actual surfaces as nil ≠ expected" do
+      {actual, expected} = Assertx.match(%{}, %{a: 1})
+      assert actual == %{a: nil}
+      assert expected == %{a: 1}
     end
 
-    test "nested map only colours the mismatched leaf" do
-      result = match(%{a: 3, b: %{c: 10, d: 20}}, %{a: M.eq(3), b: %{c: M.eq(10), d: M.eq(99)}})
-
-      assert render(result) ==
-               """
-               %{
-                 a: #{@green}3 == 3#{@reset},
-                 b: %{
-                   c: #{@green}10 == 10#{@reset},
-                   d: #{@red}20 != 99#{@reset}
-                 }
-               }\
-               """
+    test "nested maps compose" do
+      assert {%{a: %{b: 1}}, %{a: %{b: 1}}} ==
+               Assertx.match(%{a: %{b: 1}}, %{a: %{b: 1}})
     end
 
-    test "map keys are sorted for stable output" do
-      result = match(%{b: 2, a: 1}, %{a: M.eq(1), b: M.eq(2)})
-      rendered = render(result)
+    test "nested mismatch only differs at the deep leaf" do
+      {actual, expected} =
+        Assertx.match(%{a: %{b: 1, c: 2}}, %{a: %{b: 1, c: 99}})
 
-      assert :binary.match(rendered, "a:") < :binary.match(rendered, "b:")
+      assert actual == %{a: %{b: 1, c: 2}}
+      assert expected == %{a: %{b: 1, c: 99}}
     end
 
-    test "non-atom keys use the => arrow form" do
-      result = match(%{"k" => 1}, %{"k" => M.eq(1)})
+    test "predicates inside maps work" do
+      {actual, expected} =
+        Assertx.match(%{age: 17}, %{age: M.predicate(&(&1 >= 18), "adult")})
 
-      assert render(result) ==
-               """
-               %{
-                 "k" => #{@green}1 == 1#{@reset}
-               }\
-               """
+      assert actual == %{age: 17}
+      assert expected == %{age: %Failed{label: "adult", actual: 17}}
+    end
+
+    test "non-map actual surfaces raw values for a structural diff" do
+      assert {:not_a_map, %{a: 1}} == Assertx.match(:not_a_map, %{a: 1})
+    end
+
+    test "string keys also work" do
+      assert {%{"k" => 1}, %{"k" => 1}} ==
+               Assertx.match(%{"k" => 1, "extra" => 2}, %{"k" => 1})
+    end
+  end
+
+  describe "match/2 — lists with a single matcher (M.all/1)" do
+    test "every element satisfies the matcher" do
+      assert {[1, 2, 3], [1, 2, 3]} == Assertx.match([1, 2, 3], M.all(&(&1 > 0)))
+    end
+
+    test "one failing element is isolated on the expected side" do
+      {actual, expected} =
+        Assertx.match([1, -1, 3], M.all(M.predicate(&(&1 > 0), "positive")))
+
+      assert actual == [1, -1, 3]
+      assert expected == [1, %Failed{label: "positive", actual: -1}, 3]
+    end
+
+    test "empty list trivially matches" do
+      assert {[], []} == Assertx.match([], M.all(&(&1 > 0)))
+    end
+
+    test "non-list actual surfaces raw values" do
+      assert {:nope, _} = Assertx.match(:nope, M.all(&(&1 > 0)))
+    end
+  end
+
+  describe "match/2 — lists element-wise (M.all([...]) or list shorthand)" do
+    test "element-wise match with equal sizes" do
+      assert {[1, 2], [1, 2]} == Assertx.match([1, 2], [1, 2])
+    end
+
+    test "size mismatch surfaces raw lists for a structural diff" do
+      {actual, expected} = Assertx.match([1, 2, 3], [1, 2])
+      assert actual == [1, 2, 3]
+      assert expected == [1, 2]
+    end
+
+    test "element-wise mismatch at one position" do
+      assert {[1, 99, 3], [1, 2, 3]} == Assertx.match([1, 99, 3], [1, 2, 3])
+    end
+
+    test "mixed matcher types in the element-wise list" do
+      {actual, expected} =
+        Assertx.match(
+          [%{n: 1}, %{n: 2}],
+          [%{n: 1}, %{n: M.predicate(&(&1 > 100), "big")}]
+        )
+
+      assert actual == [%{n: 1}, %{n: 2}]
+      assert expected == [%{n: 1}, %{n: %Failed{label: "big", actual: 2}}]
+    end
+  end
+
+  describe "Failed Inspect impl" do
+    test "renders integer values" do
+      assert inspect(%Failed{label: "adult", actual: 17}) == "#Failed<adult: 17>"
+    end
+
+    test "delegates value rendering to Inspect" do
+      assert inspect(%Failed{label: "uuid", actual: "x"}) == ~s(#Failed<uuid: "x">)
+    end
+
+    test "renders nil values" do
+      assert inspect(%Failed{label: "present", actual: nil}) == "#Failed<present: nil>"
+    end
+  end
+
+  describe "assert_match — passes for matching shapes" do
+    test "literal equality" do
+      assert_match 1, 1
+    end
+
+    test "atom equality" do
+      assert_match :ok, :ok
+    end
+
+    test "exact map" do
+      assert_match %{a: 1, b: 2}, %{a: 1, b: 2}
+    end
+
+    test "partial map — extra keys ignored" do
+      assert_match %{a: 1, b: 2, extra: :ignored}, %{a: 1}
+    end
+
+    test "M.predicate" do
+      assert_match 21, M.predicate(&(&1 >= 18), "adult")
+    end
+
+    test "bare predicate function" do
+      assert_match 21, &(&1 >= 18)
+    end
+
+    test "nested map" do
+      user = %{name: "Alice", profile: %{age: 30, country: "UK"}}
+      assert_match user, %{name: "Alice", profile: %{age: 30}}
+    end
+
+    test "list element-wise via shorthand" do
+      assert_match [1, 2, 3], [1, 2, 3]
+    end
+
+    test "list with M.all and a single predicate" do
+      assert_match [1, 2, 3], M.all(&(&1 > 0))
+    end
+
+    test "list with M.all and per-element matchers" do
+      assert_match [%{n: 1}, %{n: 2}], M.all([%{n: 1}, %{n: M.predicate(&(&1 > 0), "positive")}])
+    end
+
+    test "deeply nested combination" do
+      payload = %{
+        user: %{
+          email: "alice@example.com",
+          age: 30,
+          roles: [:admin, :writer]
+        },
+        meta: %{request_id: "r-123"}
+      }
+
+      assert_match payload, %{
+        user: %{
+          email: "alice@example.com",
+          age: M.predicate(&(&1 >= 18), "adult"),
+          roles: M.all(&is_atom/1)
+        }
+      }
+    end
+  end
+
+  describe "assert_match — failures raise ExUnit.AssertionError" do
+    test "value mismatch populates left and right" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(1, 2)
+        end
+
+      assert err.left == 1
+      assert err.right == 2
+    end
+
+    test "carries the assert_match label in the message" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(1, 2)
+        end
+
+      assert err.message == "assert_match failed"
+    end
+
+    test "map mismatch shows only the asserted keys on each side" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(%{a: 1, b: 2, untouched: :ok}, %{a: 1, b: 99})
+        end
+
+      assert err.left == %{a: 1, b: 2}
+      assert err.right == %{a: 1, b: 99}
+      refute Map.has_key?(err.left, :untouched)
+    end
+
+    test "predicate failure surfaces a Failed sentinel on the right" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(17, M.predicate(&(&1 >= 18), "adult"))
+        end
+
+      assert err.left == 17
+      assert err.right == %Failed{label: "adult", actual: 17}
+    end
+
+    test "deeply nested mismatch isolates the failing leaf" do
+      actual = %{user: %{profile: %{age: 17, country: "UK"}}}
+
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(actual, %{
+            user: %{profile: %{age: M.predicate(&(&1 >= 18), "adult")}}
+          })
+        end
+
+      assert err.left == %{user: %{profile: %{age: 17}}}
+      assert %{user: %{profile: %{age: %Failed{label: "adult", actual: 17}}}} = err.right
+    end
+
+    test "list element-wise size mismatch surfaces raw lists" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match([1, 2, 3], [1, 2])
+        end
+
+      assert err.left == [1, 2, 3]
+      assert err.right == [1, 2]
+    end
+
+    test "M.all mismatch isolates the failing element" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match([1, -1, 3], M.all(M.predicate(&(&1 > 0), "positive")))
+        end
+
+      assert err.left == [1, -1, 3]
+      assert err.right == [1, %Failed{label: "positive", actual: -1}, 3]
+    end
+
+    test "missing map key shows as nil on the left" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(%{}, %{required: :present})
+        end
+
+      assert err.left == %{required: nil}
+      assert err.right == %{required: :present}
+    end
+
+    test "non-map actual against a map spec surfaces structural mismatch" do
+      err =
+        assert_raise ExUnit.AssertionError, fn ->
+          assert_match(:not_a_map, %{a: 1})
+        end
+
+      assert err.left == :not_a_map
+      assert err.right == %{a: 1}
+    end
+  end
+
+  describe "assert_match — return value" do
+    test "returns the original actual value on success" do
+      user = %{a: 1, b: 2, c: 3}
+      assert user == assert_match(user, %{a: 1})
+    end
+
+    test "evaluates actual only once" do
+      counter = :counters.new(1, [])
+      bump = fn -> :counters.add(counter, 1, 1) end
+
+      side_effect = fn ->
+        bump.()
+        42
+      end
+
+      assert_match(side_effect.(), 42)
+      assert :counters.get(counter, 1) == 1
     end
   end
 end

@@ -1,127 +1,70 @@
 defmodule Assertx do
-  alias Assertx.Matchers, as: M
+  @moduledoc """
+  Composable matchers for ExUnit assertions.
 
-  defmodule Match do
-    @keys [:value]
-    @enforce_keys @keys
-    defstruct @keys
+  The library walks an `expected` shape against an `actual` value and produces a
+  `{pinned_actual, pinned_expected}` pair where the two halves compare equal iff
+  every matcher in the tree succeeded. On failure, `Assertx.ExUnit.assert_match/2`
+  hands the pair to `ExUnit`'s diff engine so the failure renders like any other
+  `assert ==` mismatch.
 
-    def new(value) do
-      %Match{value: value}
+  See `Assertx.ExUnit.assert_match/2` for the typical entry point and
+  `Assertx.Matchers` for the matcher combinators (`eq/1`, `predicate/2`,
+  `map/1`, `all/1`).
+  """
+
+  alias Assertx.Matchers
+
+  defmodule Failed do
+    @moduledoc """
+    Sentinel placed on the `expected` side of a pinned pair whenever a predicate
+    fails. Its custom `Inspect` impl makes failures render as
+    `#Failed<label: actual>` inside ExUnit's diff output.
+    """
+
+    @enforce_keys [:label, :actual]
+    defstruct [:label, :actual]
+
+    defimpl Inspect do
+      import Inspect.Algebra
+
+      def inspect(%{label: label, actual: actual}, opts) do
+        concat(["#Failed<", to_string(label), ": ", Inspect.inspect(actual, opts), ">"])
+      end
     end
   end
 
-  defmodule Mismatch do
-    @keys [:value]
-    @enforce_keys @keys
-    defstruct @keys
+  @doc """
+  Walks `expected` against `actual` and returns `{pinned_actual, pinned_expected}`.
 
-    def new(value) do
-      %Mismatch{value: value}
+  The pair compares equal exactly when the match succeeds, so it can be handed
+  straight to `assert ==` (or to ExUnit's diff engine via `Assertx.ExUnit.assert_match/2`).
+
+  `expected` may be:
+
+    * a literal — equality check
+    * a plain map — partial-match against `actual` (extra keys ignored)
+    * a list — element-wise match against `actual`
+    * a 1-arity function — treated as a predicate
+    * a matcher built with `Assertx.Matchers.*` — invoked directly
+  """
+  def match(actual, expected) when is_function(expected, 1) do
+    case expected.(actual) do
+      {_, _} = pair -> pair
+      falsy when falsy in [false, nil] -> {actual, %Failed{label: "predicate", actual: actual}}
+      _truthy -> {actual, actual}
     end
   end
 
-  #### MATCH ####
-
-  def match(left, right) when not is_function(right) do
-    match(left, default_matcher(right))
+  def match(actual, expected) when is_map(expected) and not is_struct(expected) do
+    Matchers.map(expected).(actual)
   end
 
-  def match(left, right) when is_function(right) do
-    case right.(left) do
-      result when is_boolean(result) -> lift_boolean(result, left, right)
-      result -> result
-    end
+  def match(actual, expected) when is_list(expected) do
+    Matchers.all(expected).(actual)
   end
 
-  defp default_matcher(right) when is_map(right), do: M.map(right)
-  defp default_matcher(right) when is_list(right), do: M.all(right)
-  defp default_matcher(right), do: M.eq(right)
-
-  defp lift_boolean(result, left, right) when is_boolean(result) and is_function(right) do
-    case result do
-      true -> Match.new({left, right})
-      false -> Mismatch.new({left, right})
-    end
-  end
-
-  #### RENDER ####
-
-  defmodule RenderContext do
-    defstruct indent_level: 0, indent: "  "
-
-    def indent(render_ctx) do
-      %{render_ctx | indent_level: render_ctx.indent_level + 1}
-    end
-  end
-
-  def render(value) do
-    value
-    |> do_render(%RenderContext{})
-    |> IO.iodata_to_binary()
-  end
-
-  defp do_render(%Match{value: value}, ctx), do: do_render_value(value, ctx, :match)
-  defp do_render(%Mismatch{value: value}, ctx), do: do_render_value(value, ctx, :mismatch)
-
-  defp do_render_value({:eq, left, right}, _ctx, :match) do
-    leaf(:match, "#{inspect(left)} == #{inspect(right)}")
-  end
-
-  defp do_render_value({:neq, left, right}, _ctx, :mismatch) do
-    leaf(:mismatch, "#{inspect(left)} != #{inspect(right)}")
-  end
-
-  defp do_render_value({left, right}, _ctx, :match) when is_function(right) do
-    leaf(:match, "#{inspect(left)} matches predicate")
-  end
-
-  defp do_render_value({left, right}, _ctx, :mismatch) when is_function(right) do
-    leaf(:mismatch, "#{inspect(left)} does not match predicate")
-  end
-
-  defp do_render_value(map, ctx, _kind) when is_map(map) and not is_struct(map) do
-    render_map(map, ctx)
-  end
-
-  defp do_render_value(list, ctx, _kind) when is_list(list) do
-    render_list(list, ctx)
-  end
-
-  defp leaf(:match, body), do: [IO.ANSI.green(), body, IO.ANSI.reset()]
-  defp leaf(:mismatch, body), do: [IO.ANSI.red(), body, IO.ANSI.reset()]
-
-  defp render_map(map, ctx) do
-    inner_ctx = RenderContext.indent(ctx)
-
-    entries =
-      map
-      |> Enum.sort_by(fn {key, _} -> key end)
-      |> Enum.map(fn {key, result} ->
-        [render_indent(inner_ctx), render_key(key), do_render(result, inner_ctx)]
-      end)
-      |> Enum.intersperse(",\n")
-
-    ["%{\n", entries, "\n", render_indent(ctx), "}"]
-  end
-
-  defp render_list(list, ctx) do
-    inner_ctx = RenderContext.indent(ctx)
-
-    entries =
-      list
-      |> Enum.map(fn result -> [render_indent(inner_ctx), do_render(result, inner_ctx)] end)
-      |> Enum.intersperse(",\n")
-
-    ["[\n", entries, "\n", render_indent(ctx), "]"]
-  end
-
-  defp render_key(key) when is_atom(key), do: "#{key}: "
-  defp render_key(key), do: "#{inspect(key)} => "
-
-  defp render_indent(%{indent_level: 0}), do: ""
-
-  defp render_indent(%{indent_level: level, indent: indent}) do
-    String.duplicate(indent, level)
+  def match(actual, expected) do
+    Matchers.eq(expected).(actual)
   end
 end

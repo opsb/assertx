@@ -22,3 +22,6 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 assertx-*.tar
 
+# Personal scratch space (per CLAUDE.md convention).
+/private-notes/
+

@@ -1,86 +1,87 @@
 defmodule Assertx.Matchers do
-  alias Assertx.Match
-  alias Assertx.Mismatch
+  @moduledoc """
+  Matcher combinators. Each returns a 1-arity function that takes an `actual`
+  value and produces a `{pinned_actual, pinned_expected}` pair — the contract
+  `Assertx.match/2` expects.
 
-  def eq(value) do
-    fn left ->
-      if left == value do
-        Match.new({:eq, left, value})
-      else
-        Mismatch.new({:neq, left, value})
-      end
+  All combinators compose recursively via `Assertx.match/2`, so map values can
+  themselves be predicates, lists can hold maps, and so on.
+  """
+
+  alias Assertx.Failed
+
+  @doc """
+  Equality matcher. Pinned pair is always `{actual, expected}` — equal iff the
+  values are equal.
+  """
+  def eq(expected) do
+    fn actual -> {actual, expected} end
+  end
+
+  @doc """
+  Predicate matcher. If `fun.(actual)` is truthy the pair pins equal; otherwise
+  the expected side becomes a `%Failed{}` carrying the optional `label`.
+  """
+  def predicate(fun, label \\ "predicate") when is_function(fun, 1) do
+    fn actual ->
+      if fun.(actual),
+        do: {actual, actual},
+        else: {actual, %Failed{label: label, actual: actual}}
     end
   end
 
-  def all(right) when is_list(right) do
-    fn left when is_list(left) ->
-      do_all(left, right)
-    end
-  end
-
-  def all(right) do
-    fn left when is_list(left) ->
-      expanded_right = Enum.map(left, fn _ -> right end)
-      do_all(left, expanded_right)
-    end
-  end
-
-  def do_all(left, right) when is_list(left) and is_list(right) do
-    results =
-      Enum.zip(left, right)
-      |> Enum.map(fn {left, right} ->
-        Assertx.match(left, right)
-      end)
-
-    aggregate(:all, results)
-  end
-
-  def map(right) when is_map(right) do
-    fn left when is_map(left) ->
-      entry_results =
-        right
-        |> Map.keys()
-        |> Map.new(fn key ->
-          {key, map_entry(left, right, key)}
+  @doc """
+  Partial map matcher. Walks each key in `spec` against `actual`, ignoring keys
+  in `actual` that aren't named in `spec`. Missing keys surface as `nil` on the
+  actual side.
+  """
+  def map(spec) when is_map(spec) and not is_struct(spec) do
+    fn
+      actual when is_map(actual) ->
+        spec
+        |> Enum.map(fn {key, matcher} ->
+          {pa, pe} = Assertx.match(Map.get(actual, key), matcher)
+          {key, pa, pe}
+        end)
+        |> Enum.reduce({%{}, %{}}, fn {key, pa, pe}, {la, le} ->
+          {Map.put(la, key, pa), Map.put(le, key, pe)}
         end)
 
-      aggregate(:all, entry_results)
+      actual ->
+        {actual, spec}
     end
   end
 
-  def map_entry(left, right, key) when is_map(left) and is_map(right) do
-    Assertx.match(Map.get(left, key), Map.get(right, key))
-  end
+  @doc """
+  List matcher.
 
-  def predicate(cb) do
-    cb
-  end
+    * `all(matcher)` — every element of `actual` is matched against the single
+      `matcher`.
+    * `all(matchers_list)` — element-wise match; sizes must agree, otherwise
+      both raw lists are surfaced for ExUnit to diff.
+  """
+  def all(matchers) when is_list(matchers) do
+    fn
+      actual when is_list(actual) and length(actual) == length(matchers) ->
+        actual
+        |> Enum.zip(matchers)
+        |> Enum.map(fn {a, m} -> Assertx.match(a, m) end)
+        |> Enum.unzip()
 
-  defp aggregate(:all, results) when is_list(results) do
-    agg_result =
-      Enum.all?(results, fn
-        %Match{} -> true
-        %Mismatch{} -> false
-      end)
-
-    if agg_result do
-      Match.new(results)
-    else
-      Mismatch.new(results)
+      actual ->
+        {actual, matchers}
     end
   end
 
-  defp aggregate(:all, results) when is_map(results) do
-    agg_result =
-      Enum.all?(Map.values(results), fn
-        %Match{} -> true
-        %Mismatch{} -> false
-      end)
+  def all(matcher) do
+    fn
+      actual when is_list(actual) ->
+        actual
+        |> Enum.map(&Assertx.match(&1, matcher))
+        |> Enum.unzip()
 
-    if agg_result do
-      Match.new(results)
-    else
-      Mismatch.new(results)
+      actual ->
+        {actual, matcher}
     end
   end
 end
