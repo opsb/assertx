@@ -76,43 +76,73 @@ defmodule AssertxTest do
     end
   end
 
-  # describe "render" do
-  #   test "matching values" do
-  #     assert render({:match, {:eq, 1, 1}}) == "#{IO.ANSI.green()}1 == 1"
-  #   end
+  describe "render" do
+    test "matching value" do
+      assert render(Match.new({:eq, 1, 1})) ==
+               "#{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}"
+    end
 
-  #   test "mismatching values" do
-  #     assert render({:mismatch, {:neq, 1, 2}}) == "#{IO.ANSI.red()}1 != 2"
-  #   end
+    test "mismatching value" do
+      assert render(Mismatch.new({:neq, 1, 2})) ==
+               "#{IO.ANSI.red()}1 != 2#{IO.ANSI.reset()}"
+    end
 
-  #   test "matching map" do
-  #     assert render({:match, %{a: {:match, {:eq, 1, 1}}}}) ==
-  #              """
-  #              #{IO.ANSI.green()}%{
-  #                #{IO.ANSI.green()}a: #{IO.ANSI.green()}1 == 1
-  #              }
-  #              """
-  #   end
+    test "matching predicate" do
+      predicate = fn x -> x > 0 end
 
-  #   test "matching nested map" do
-  #     result =
-  #       render({:match, %{a: {:match, {:eq, 3, 3}}, b: {:match, %{c: {:match, {:eq, 10, 10}}}}}})
+      assert render(Match.new({5, predicate})) ==
+               "#{IO.ANSI.green()}5 matches #{inspect(predicate)}#{IO.ANSI.reset()}"
+    end
 
-  #     IO.puts("\noutput")
-  #     IO.puts(result)
-  #     IO.puts("\nother")
+    test "mismatching predicate" do
+      predicate = fn x -> x > 0 end
 
-  #     assert render(
-  #              {:match, %{a: {:match, {:eq, 3, 3}}, b: {:match, %{c: {:match, {:eq, 10, 10}}}}}}
-  #            ) ==
-  #              String.strip("""
-  #              #{IO.ANSI.green()}%{
-  #                a: 3 == 3
-  #                b: %{
-  #                  c: 10 == 10
-  #                }
-  #              }
-  #              """)
-  #   end
-  # end
+      assert render(Mismatch.new({-1, predicate})) ==
+               "#{IO.ANSI.red()}-1 does not match #{inspect(predicate)}#{IO.ANSI.reset()}"
+    end
+
+    test "matching map" do
+      result = match(%{a: 1}, %{a: M.eq(1)})
+
+      assert render(result) ==
+               """
+               #{IO.ANSI.green()}%{
+                 #{IO.ANSI.green()}a: #{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}
+               #{IO.ANSI.green()}}#{IO.ANSI.reset()}\
+               """
+    end
+
+    test "mismatching map entry colours the wrapper red" do
+      result = match(%{a: 7}, %{a: M.eq(8)})
+
+      assert render(result) ==
+               """
+               #{IO.ANSI.red()}%{
+                 #{IO.ANSI.red()}a: #{IO.ANSI.red()}7 != 8#{IO.ANSI.reset()}
+               #{IO.ANSI.red()}}#{IO.ANSI.reset()}\
+               """
+    end
+
+    test "matching list" do
+      result = match([1, 2], M.all([1, 2]))
+
+      assert render(result) ==
+               """
+               #{IO.ANSI.green()}[
+                 #{IO.ANSI.green()}1 == 1#{IO.ANSI.reset()}
+                 #{IO.ANSI.green()}2 == 2#{IO.ANSI.reset()}
+               #{IO.ANSI.green()}]#{IO.ANSI.reset()}\
+               """
+    end
+
+    test "nested map renders with indentation" do
+      result = match(%{a: 3, b: %{c: 10}}, %{a: M.eq(3), b: %{c: M.eq(10)}})
+
+      rendered = render(result)
+
+      assert rendered =~ "a: #{IO.ANSI.green()}3 == 3"
+      assert rendered =~ "b: #{IO.ANSI.green()}%{"
+      assert rendered =~ "    #{IO.ANSI.green()}c: #{IO.ANSI.green()}10 == 10"
+    end
+  end
 end
